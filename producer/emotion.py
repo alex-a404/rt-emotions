@@ -227,7 +227,7 @@ try:
         ret, frame = cap.read()
         if not ret:
             break
-        ts_now = time.time()  # timestamp to measure camera->topic latency
+        
         frame_index += 1
         h, w, _ = frame.shape
 
@@ -365,11 +365,11 @@ try:
             )
 
         # include a timestamp for latency measurement
-        payload = json.dumps({"ts": ts_now, "data": msg})
+        payload = json.dumps(msg)
 
         # non-blocking enqueue; drop if queue full (keeps camera loop low-latency)
         try:
-            produce_queue.put_nowait(("emotions.rt.v1", "0", payload))
+            produce_queue.put_nowait(("emotions.rt.v1", str(frame_index), payload))
         except queue.Full:
             # drop message - measure dropped count in real app if needed
             log.warning("Producer queue full: dropping message")
