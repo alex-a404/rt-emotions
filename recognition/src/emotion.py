@@ -2,18 +2,19 @@ import cv2
 import mediapipe as mp
 from deepface import DeepFace
 import concurrent.futures
-import time
 import math
 from collections import deque
 import json
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 from confluent_kafka import Producer
 import threading
 import queue
 import logging
 
 # ----------------- Logging -----------------
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 log = logging.getLogger("emotion_producer")
 
 # -------------- MediaPipe Hands setup --------------
@@ -32,10 +33,11 @@ mp_face_detection = mp.solutions.face_detection
 face_detector_mp = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
 
 # finger indices for counting
-FINGER_TIPS = [8, 12, 16, 20]   # index, middle, ring, pinky
+FINGER_TIPS = [8, 12, 16, 20]  # index, middle, ring, pinky
 FINGER_PIPS = [6, 10, 14, 18]
 THUMB_TIP = 4
 THUMB_IP = 3
+
 
 def count_fingers(hand_landmarks, hand_label):
     fingers = 0
@@ -54,35 +56,38 @@ def count_fingers(hand_landmarks, hand_label):
             fingers += 1
     return fingers
 
+
 # optional smoothing for finger counts (reduce flicker)
 FINGER_SMOOTH_HISTORY = 5
 
 # -------------- Face detection + DeepFace async setup --------------
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 tracked_faces = {}
 next_track_id = 0
 
 # parameters
-REANALYZE_FRAMES = 30          # re-run DeepFace for a tracked face after this many frames
+REANALYZE_FRAMES = 30  # re-run DeepFace for a tracked face after this many frames
 TRACKER_DISAPPEAR_FRAMES = 60  # remove track if not seen for this many frames
-DISTANCE_MATCH_THRESHOLD = 100 # px - used to match new detections to existing tracks
+DISTANCE_MATCH_THRESHOLD = 100  # px - used to match new detections to existing tracks
 HAND_FACE_MAP_THRESHOLD = 150  # px - max distance to map a hand to a face
 
 frame_index = 0
 
 
-def euclidean(a,b):
-    return math.hypot(a[0]-b[0], a[1]-b[1])
+def euclidean(a, b):
+    return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
 def centroid_of_bbox(bbox):
-    x,y,w,h = bbox
-    return (int(x + w/2), int(y + h/2))
+    x, y, w, h = bbox
+    return (int(x + w / 2), int(y + h / 2))
 
 
-def map_hands_to_faces(hands_positions : List, face_positions : List):
+def map_hands_to_faces(hands_positions: List, face_positions: List):
     pairs = []
     for h_idx, (n_fingers, hand_pos) in enumerate(hands_positions):
         for face_id, face_pos in face_positions:
@@ -127,8 +132,9 @@ def analyze_face_async(track_id, face_roi):
 def submit_face_for_analysis(track_id, face_roi):
     if track_id not in tracked_faces:
         return
-    tracked_faces[track_id]['processing'] = True
+    tracked_faces[track_id]["processing"] = True
     fut = executor.submit(analyze_face_async, track_id, face_roi)
+
     def _callback(future):
         try:
             tid, dominant = future.result()
@@ -139,25 +145,27 @@ def submit_face_for_analysis(track_id, face_roi):
                     except KeyError:
                         pass
                 else:
-                    tracked_faces[tid]['emotion'] = dominant
-                    tracked_faces[tid]['last_analyzed_frame'] = frame_index
-                    tracked_faces[tid]['processing'] = False
-        except Exception as e:
+                    tracked_faces[tid]["emotion"] = dominant
+                    tracked_faces[tid]["last_analyzed_frame"] = frame_index
+                    tracked_faces[tid]["processing"] = False
+        except Exception:
             if track_id in tracked_faces:
-                tracked_faces[track_id]['processing'] = False
+                tracked_faces[track_id]["processing"] = False
             log.exception("Analysis callback error")
+
     fut.add_done_callback(lambda f: _callback(f))
 
 
 def read_config(path):
-  config = {}
-  with open(path) as fh:
-    for line in fh:
-      line = line.strip()
-      if len(line) != 0 and line[0] != "#":
-        parameter, value = line.strip().split('=', 1)
-        config[parameter] = value.strip()
-  return config
+    config = {}
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if len(line) != 0 and line[0] != "#":
+                parameter, value = line.strip().split("=", 1)
+                config[parameter] = value.strip()
+    return config
+
 
 # ---------------- Kafka producer (single instance + background thread) ----------------
 PRODUCER_QUEUE_MAX = 400
@@ -204,18 +212,19 @@ def producer_worker():
             producer.poll(0)
         produce_queue.task_done()
 
+
 # ------------------- Main application -------------------
 
 cap = cv2.VideoCapture(0)
 if not cap.isOpened():
     raise RuntimeError("Could not open camera")
 
-config = read_config("/home/alex/Desktop/facerec/producer/client.properties")
+config = read_config("/home/alex/Desktop/facerec/config/camera_feed.properties")
 # low-latency defaults (only if not set in config file)
-config.setdefault('acks', '1')
-config.setdefault('queue.buffering.max.ms', '10')
-config.setdefault('socket.nagle.disable', 'true')
-config.setdefault('compression.type', 'none')
+config.setdefault("acks", "1")
+config.setdefault("queue.buffering.max.ms", "10")
+config.setdefault("socket.nagle.disable", "true")
+config.setdefault("compression.type", "none")
 
 # create single producer and start worker thread
 producer = Producer(config)
@@ -227,7 +236,7 @@ try:
         ret, frame = cap.read()
         if not ret:
             break
-        
+
         frame_index += 1
         h, w, _ = frame.shape
 
@@ -240,7 +249,9 @@ try:
         hands_positions = []
 
         if results.multi_hand_landmarks and results.multi_handedness:
-            for hand_landmarks, hand_handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+            for hand_landmarks, hand_handedness in zip(
+                results.multi_hand_landmarks, results.multi_handedness
+            ):
                 hand_label = hand_handedness.classification[0].label
                 fingers = count_fingers(hand_landmarks, hand_label)
                 finger_count.append(fingers)
@@ -251,25 +262,39 @@ try:
                 if y_pos < 20:
                     y_pos = int(wrist.y * h) + 30
 
-                key = (round(x_pos/40), round(y_pos/40))
+                key = (round(x_pos / 40), round(y_pos / 40))
                 if key not in per_hand_smooth:
                     per_hand_smooth[key] = deque(maxlen=FINGER_SMOOTH_HISTORY)
                 per_hand_smooth[key].append(fingers)
-                smoothed = int(round(sum(per_hand_smooth[key]) / len(per_hand_smooth[key])))
+                smoothed = int(
+                    round(sum(per_hand_smooth[key]) / len(per_hand_smooth[key]))
+                )
 
-                hands_positions.append((smoothed, (x_pos,y_pos)))
+                hands_positions.append((smoothed, (x_pos, y_pos)))
 
-                mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-                cv2.putText(frame, f"{hand_label}: {smoothed}", (x_pos, y_pos),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0,255,0), 2, cv2.LINE_AA)
+                mp_drawing.draw_landmarks(
+                    frame, hand_landmarks, mp_hands.HAND_CONNECTIONS
+                )
+                cv2.putText(
+                    frame,
+                    f"{hand_label}: {smoothed}",
+                    (x_pos, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.9,
+                    (0, 255, 0),
+                    2,
+                    cv2.LINE_AA,
+                )
 
         # 2) Face detection (Haar cascade)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        detected = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=6, minSize=(60,60))
+        detected = face_cascade.detectMultiScale(
+            gray, scaleFactor=1.1, minNeighbors=6, minSize=(60, 60)
+        )
 
         seen_track_ids = set()
 
-        for (x,y,fw,fh) in detected:
+        for x, y, fw, fh in detected:
             x0 = max(x, 0)
             y0 = max(y, 0)
             x1 = min(x + fw, w)
@@ -283,39 +308,45 @@ try:
             if not (mp_results and mp_results.detections):
                 continue
 
-            cx, cy = centroid_of_bbox((x,y,fw,fh))
+            cx, cy = centroid_of_bbox((x, y, fw, fh))
 
             best_tid = None
             best_dist = None
             for tid, info in tracked_faces.items():
-                dist = euclidean((cx,cy), info['centroid'])
+                dist = euclidean((cx, cy), info["centroid"])
                 if best_dist is None or dist < best_dist:
                     best_dist = dist
                     best_tid = tid
 
-            if best_tid is not None and best_dist is not None and best_dist < DISTANCE_MATCH_THRESHOLD:
+            if (
+                best_tid is not None
+                and best_dist is not None
+                and best_dist < DISTANCE_MATCH_THRESHOLD
+            ):
                 tid = best_tid
-                tracked_faces[tid]['bbox'] = (x,y,fw,fh)
-                tracked_faces[tid]['centroid'] = (cx,cy)
-                tracked_faces[tid]['last_seen_frame'] = frame_index
+                tracked_faces[tid]["bbox"] = (x, y, fw, fh)
+                tracked_faces[tid]["centroid"] = (cx, cy)
+                tracked_faces[tid]["last_seen_frame"] = frame_index
                 seen_track_ids.add(tid)
             else:
                 tid = next_track_id
                 next_track_id += 1
                 tracked_faces[tid] = {
-                    'bbox': (x,y,fw,fh),
-                    'centroid': (cx,cy),
-                    'emotion': "analyzing",
-                    'processing': False,
-                    'last_analyzed_frame': -9999,
-                    'last_seen_frame': frame_index
+                    "bbox": (x, y, fw, fh),
+                    "centroid": (cx, cy),
+                    "emotion": "neutral",
+                    "processing": False,
+                    "last_analyzed_frame": -9999,
+                    "last_seen_frame": frame_index,
                 }
                 seen_track_ids.add(tid)
 
             info = tracked_faces.get(tid)
             if info is None:
                 continue
-            needs_analysis = (not info.get('processing', False)) and (frame_index - info.get('last_analyzed_frame', -9999) >= REANALYZE_FRAMES)
+            needs_analysis = (not info.get("processing", False)) and (
+                frame_index - info.get("last_analyzed_frame", -9999) >= REANALYZE_FRAMES
+            )
             if needs_analysis:
                 pad = int(min(fw, fh) * 0.15)
                 xa = max(x - pad, 0)
@@ -327,7 +358,7 @@ try:
 
         to_delete = []
         for tid, info in list(tracked_faces.items()):
-            if frame_index - info.get('last_seen_frame', 0) > TRACKER_DISAPPEAR_FRAMES:
+            if frame_index - info.get("last_seen_frame", 0) > TRACKER_DISAPPEAR_FRAMES:
                 to_delete.append(tid)
         for tid in to_delete:
             del tracked_faces[tid]
@@ -336,40 +367,44 @@ try:
         emotions_dict = {}
 
         for tid, info in tracked_faces.items():
-            x,y,fw,fh = info['bbox']
-            emotion = info.get('emotion', 'unknown')
-            emotions_dict[tid]=emotion
-            cv2.rectangle(frame, (x,y), (x+fw, y+fh), (0,0,255), 2)
+            x, y, fw, fh = info["bbox"]
+            emotion = info.get("emotion", "neutral")
+            emotions_dict[tid] = emotion.upper()
+            cv2.rectangle(frame, (x, y), (x + fw, y + fh), (0, 0, 255), 2)
             label = f"{emotion}"
-            cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0,0,255), 2)
-            faces_positions.append((tid, info['centroid']))
+            cv2.putText(
+                frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2
+            )
+            faces_positions.append((tid, info["centroid"]))
 
-        cv2.putText(frame, f"People: {len(tracked_faces)}", (10, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,0,0), 2, cv2.LINE_AA)
+        cv2.putText(
+            frame,
+            f"People: {len(tracked_faces)}",
+            (10, 80),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (255, 0, 0),
+            2,
+            cv2.LINE_AA,
+        )
 
         cv2.imshow("Combined - Hands (fingers) + Faces (emotion)", frame)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
         facemap = map_hands_to_faces(hands_positions, faces_positions)
 
         msg = []
-        for tid,emotion in emotions_dict.items():
-            msg.append(
-                {
-                    "id":tid,
-                    "emotion":emotion,
-                    "fingers":facemap.get(tid,[])
-                }
-            )
+        for tid, emotion in emotions_dict.items():
+            msg.append({"id": tid, "emotion": emotion, "fingers": facemap.get(tid, [])})
 
         # include a timestamp for latency measurement
         payload = json.dumps(msg)
 
         # non-blocking enqueue; drop if queue full (keeps camera loop low-latency)
         try:
-            produce_queue.put_nowait(("emotions.rt.v1", str(frame_index), payload))
+            produce_queue.put_nowait(("emotions.rt.v2", str(frame_index), payload))
         except queue.Full:
             # drop message - measure dropped count in real app if needed
             log.warning("Producer queue full: dropping message")

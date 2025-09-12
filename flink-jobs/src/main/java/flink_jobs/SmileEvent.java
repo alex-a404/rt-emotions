@@ -1,8 +1,11 @@
 package flink_jobs;
 
 public class SmileEvent {
-    private int id;
+    private final int id;
     public SmileEvent(int id) {
         this.id = id;
+    }
+    public int getId() {
+        return id;
     }
 }

@@ -1,6 +1,7 @@
 plugins {
     id 'java'
     id 'application'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 group = 'org.example'
@@ -33,7 +34,7 @@ dependencies {
 }
 
 application {
-    mainClass = 'org.example.Main'
+    mainClass = 'flink_jobs.SmileEventJob'
 }
 
 test {

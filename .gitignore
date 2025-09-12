@@ -38,4 +38,5 @@ build/
 ### Mac OS ###
 .DS_Store
 
-producer/client.properties
+recognition/src/camera_feed.properties
+flink-jobs/src/main/resources/analytics.properties

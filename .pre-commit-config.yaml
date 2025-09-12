@@ -1,0 +1,25 @@
+repos:
+  # --- Python ---
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.5
+    hooks:
+      - id: ruff
+        args: [--fix]        # auto-fix lint issues where possible
+      - id: ruff-format      # ruff’s formatter (Black-compatible)
+
+  # --- Java (Gradle + Spotless) --- todo add
+
+  # --- General cleanup ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
