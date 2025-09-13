@@ -25,3 +25,17 @@ services:
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
         taskmanager.numberOfTaskSlots: 2
+
+  job-submitter:
+    image: flink:1.20.0-scala_2.12-java17
+    container_name: job-submitter
+    depends_on:
+      - jobmanager
+      - taskmanager
+    volumes:
+      - ./flink-java-jobs/build/libs:/jars
+    entrypoint: >
+      /bin/sh -c "
+      sleep 10 &&
+      flink run -m jobmanager:8081 /jars/facerec2-1.0-SNAPSHOT-all.jar
+      "

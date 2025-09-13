@@ -1,5 +1,6 @@
 package flink_jobs;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.serialization.SerializationSchema;
@@ -14,19 +15,20 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.util.Collector;
 import serde.Person;
+
 import serde.PersonListDeserializationSchema;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Properties;
 
-public class SmileEventJob {
+public class UniqueEmotionsEventsJob {
 
     public static void main(String[] args) throws Exception {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
+        ObjectMapper objectMapper = new ObjectMapper();
         // Load properties from resources folder
         Properties config = readConfig("analytics.properties");
 
@@ -38,18 +40,25 @@ public class SmileEventJob {
                         .setGroupId(config.getProperty("group.id"))
                         .setProperties(config)
                         .setValueOnlyDeserializer(new PersonListDeserializationSchema())
-                        .setStartingOffsets(OffsetsInitializer.latest())
+                        .setStartingOffsets(OffsetsInitializer.latest()) //get latest from Kafka topic
                         .build();
 
         // Kafka sink
-        KafkaSink<SmileEvent> smileSink = KafkaSink.<SmileEvent>builder()
+        KafkaSink<EmotionsEvent> uniqueEmotionsSink = KafkaSink.<EmotionsEvent>builder()
                 .setBootstrapServers(config.getProperty("bootstrap.servers"))
                 .setKafkaProducerConfig(config)
                 .setRecordSerializer(KafkaRecordSerializationSchema.builder()
                         .setTopic("rt.smile-events.v1")
-                        .setValueSerializationSchema((SerializationSchema<SmileEvent>)
-                                smileEvent -> ByteBuffer.allocate(4)
-                                        .putInt(smileEvent.getId()).array())
+                        .setValueSerializationSchema(
+                                (SerializationSchema<EmotionsEvent>) emotionsEvent -> {
+                                    try {
+                                        // Convert EmotionEvent to JSON bytes
+                                        return objectMapper.writeValueAsBytes(emotionsEvent);
+                                    } catch (Exception e) {
+                                        throw new RuntimeException("Failed to serialize EmotionEvent to JSON", e);
+                                    }
+                                }
+                        )
                         .build()
                 )
                 .build();
@@ -57,7 +66,7 @@ public class SmileEventJob {
         // Flink pipeline with explicit type hint for List<Person>
         DataStream<List<Person>> personListStream = env
                 .fromSource(source, WatermarkStrategy.noWatermarks(), "Kafka Source")
-                .returns(TypeInformation.of(new TypeHint<List<Person>>() {})); // <-- FIX
+                .returns(TypeInformation.of(new TypeHint<List<Person>>() {}));
 
         personListStream
                 .flatMap(new FlatMapFunction<List<Person>, Person>() {
@@ -65,19 +74,19 @@ public class SmileEventJob {
                     public void flatMap(List<Person> people, Collector<Person> collector) throws Exception {
                         for (Person p : people) collector.collect(p);
                     }
-                }).returns(Person.class)  // <-- FIX
+                }).returns(Person.class)
                 .keyBy((KeySelector<Person, Integer>) Person::getInFrameId)
-                .flatMap(new StatefulSmileEmitter())
-                .sinkTo(smileSink);
+                .flatMap(new StatefulEmotionEmitter())
+                .sinkTo(uniqueEmotionsSink);
 
 
-        env.execute("Smile Event Job");
+        env.execute("UniqueEmotions Events Job");
     }
 
     // Load properties from resources
     public static Properties readConfig(final String configFile) throws IOException {
         final Properties config = new Properties();
-        try (InputStream inputStream = SmileEventJob.class.getClassLoader().getResourceAsStream(configFile)) {
+        try (InputStream inputStream = UniqueEmotionsEventsJob.class.getClassLoader().getResourceAsStream(configFile)) {
             if (inputStream == null) {
                 throw new IOException(configFile + " not found in resources.");
             }

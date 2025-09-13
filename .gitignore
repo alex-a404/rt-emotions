@@ -39,4 +39,4 @@ build/
 .DS_Store
 
 recognition/src/camera_feed.properties
-flink-jobs/src/main/resources/analytics.properties
+flink-java-jobs/src/main/resources/analytics.properties

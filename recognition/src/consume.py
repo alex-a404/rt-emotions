@@ -17,7 +17,7 @@ def read_config(path):
 def consume(topic, config):
     # sets the consumer group ID and offset
     config["group.id"] = "python-group-1"
-    config["auto.offset.reset"] = "earliest"
+    config["auto.offset.reset"] = "latest"
 
     # creates a new consumer instance
     consumer = Consumer(config)
@@ -42,5 +42,7 @@ def consume(topic, config):
         consumer.close()
 
 
-config = read_config("/home/alex/Desktop/facerec/config/camera_feed.properties")
+config = read_config(
+    "/home/alex/Desktop/facerec/recognition/src/camera_feed.properties"
+)
 consume("rt.smile-events.v1", config)

@@ -6,5 +6,6 @@ public enum Emotion {
     NEUTRAL,
     FEAR,
     SURPRISE,
+    ANGRY,
     ANALYZING
 }

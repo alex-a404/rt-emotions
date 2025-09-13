@@ -10,6 +10,7 @@ from confluent_kafka import Producer
 import threading
 import queue
 import logging
+import os
 
 # ----------------- Logging -----------------
 logging.basicConfig(
@@ -219,7 +220,10 @@ cap = cv2.VideoCapture(0)
 if not cap.isOpened():
     raise RuntimeError("Could not open camera")
 
-config = read_config("/home/alex/Desktop/facerec/config/camera_feed.properties")
+properties_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "camera_feed.properties"
+)
+config = read_config(properties_path)
 # low-latency defaults (only if not set in config file)
 config.setdefault("acks", "1")
 config.setdefault("queue.buffering.max.ms", "10")
