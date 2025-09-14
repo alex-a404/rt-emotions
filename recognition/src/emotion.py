@@ -11,6 +11,11 @@ import threading
 import queue
 import logging
 import os
+import streamlit as st
+import time
+
+st.title("Emotion Recognition")
+st_frame = st.empty()
 
 # ----------------- Logging -----------------
 logging.basicConfig(
@@ -111,10 +116,12 @@ def map_hands_to_faces(hands_positions: List, face_positions: List):
     return face_hand_map
 
 
-def analyze_face_async(track_id, face_roi):
+def analyze_face_async(track_id, face_roi_bgr):
+    # convert roi to RGB for DeepFace
     try:
-        roi = cv2.resize(face_roi, (224, 224))
-        result = DeepFace.analyze(roi, actions=["emotion"], enforce_detection=True)
+        roi = cv2.resize(face_roi_bgr, (224, 224))
+        roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+        result = DeepFace.analyze(roi_rgb, actions=["emotion"], enforce_detection=True)
         if isinstance(result, list) and len(result) > 0 and "emotion" in result[0]:
             emotions = result[0]["emotion"]
         elif isinstance(result, dict) and "emotion" in result:
@@ -245,8 +252,8 @@ try:
         h, w, _ = frame.shape
 
         # 1) Hand detection + finger counting
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(frame_rgb)
+        frame_rgb_for_mp = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = hands.process(frame_rgb_for_mp)
 
         finger_count = []
         per_hand_smooth = {}
@@ -392,10 +399,9 @@ try:
             cv2.LINE_AA,
         )
 
-        cv2.imshow("Combined - Hands (fingers) + Faces (emotion)", frame)
-
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
+        # convert to RGB for Streamlit
+        frame_rgb_display = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        st_frame.image(frame_rgb_display, channels="RGB")
 
         facemap = map_hands_to_faces(hands_positions, faces_positions)
 
@@ -413,6 +419,9 @@ try:
             # drop message - measure dropped count in real app if needed
             log.warning("Producer queue full: dropping message")
 
+        # small sleep to yield CPU and allow Streamlit to serve updates
+        time.sleep(0.02)
+
 finally:
     # cleanup pipeline
     shutdown_event.set()
@@ -428,7 +437,7 @@ finally:
             log.exception("Producer flush failed")
 
     cap.release()
-    cv2.destroyAllWindows()
+    # no cv2.destroyAllWindows() because we don't open local windows
     hands.close()
     face_detector_mp.close()
     executor.shutdown(wait=False)

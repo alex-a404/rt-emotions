@@ -1,6 +1,7 @@
 version: "3.9"
 
 services:
+  # basic Flink services
   jobmanager:
     image: flink:1.20.0-scala_2.12-java17
     container_name: jobmanager
@@ -26,6 +27,7 @@ services:
         jobmanager.rpc.address: jobmanager
         taskmanager.numberOfTaskSlots: 2
 
+  # this is to automatically submit Java and SQL Flink jobs
   job-submitter:
     image: flink:1.20.0-scala_2.12-java17
     container_name: job-submitter
@@ -39,3 +41,30 @@ services:
       sleep 10 &&
       flink run -m jobmanager:8081 /jars/facerec2-1.0-SNAPSHOT-all.jar
       "
+
+  # launch the emotion recognition producer + Streamlit UI
+  emotion-rec:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emotion
+    depends_on:
+      - jobmanager
+      - taskmanager
+    volumes:
+      - ./recognition:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix   # X11 socket for GUI (Linux only)
+    working_dir: /app
+    # Streamlit serves the UI; bind to 0.0.0.0 so host can reach it
+    command: >
+      streamlit run src/emotion.py --server.port=8501 --server.address=0.0.0.0
+    stdin_open: true
+    tty: true
+    devices:
+      - "/dev/video0:/dev/video0"   # camera (Linux) — remove on Windows/macOS
+    environment:
+      - DISPLAY=${DISPLAY}           # forward X11 for GUI (Linux)
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8501:8501"                  # Streamlit UI
+    restart: unless-stopped

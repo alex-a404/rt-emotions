@@ -1,0 +1,6 @@
+opencv-python
+tf-keras
+mediapipe
+deepface
+confluent-kafka
+streamlit
