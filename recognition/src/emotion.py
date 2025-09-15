@@ -12,6 +12,7 @@ import queue
 import logging
 import os
 import streamlit as st
+import sys
 import time
 
 st.title("Emotion Recognition")
@@ -72,16 +73,12 @@ face_cascade = cv2.CascadeClassifier(
 )
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
-tracked_faces = {}
-next_track_id = 0
 
 # parameters
 REANALYZE_FRAMES = 30  # re-run DeepFace for a tracked face after this many frames
 TRACKER_DISAPPEAR_FRAMES = 60  # remove track if not seen for this many frames
 DISTANCE_MATCH_THRESHOLD = 100  # px - used to match new detections to existing tracks
 HAND_FACE_MAP_THRESHOLD = 150  # px - max distance to map a hand to a face
-
-frame_index = 0
 
 
 def euclidean(a, b):
@@ -90,7 +87,7 @@ def euclidean(a, b):
 
 def centroid_of_bbox(bbox):
     x, y, w, h = bbox
-    return (int(x + w / 2), int(y + h / 2))
+    return int(x + w / 2), int(y + h / 2)
 
 
 def map_hands_to_faces(hands_positions: List, face_positions: List):
@@ -134,10 +131,10 @@ def analyze_face_async(track_id, face_roi_bgr):
             dominant = "unknown"
     except Exception:
         dominant = "not_face"
-    return (track_id, dominant)
+    return track_id, dominant
 
 
-def submit_face_for_analysis(track_id, face_roi):
+def submit_face_for_analysis(track_id, face_roi, tracked_faces, frame_idx):
     if track_id not in tracked_faces:
         return
     tracked_faces[track_id]["processing"] = True
@@ -154,7 +151,7 @@ def submit_face_for_analysis(track_id, face_roi):
                         pass
                 else:
                     tracked_faces[tid]["emotion"] = dominant
-                    tracked_faces[tid]["last_analyzed_frame"] = frame_index
+                    tracked_faces[tid]["last_analyzed_frame"] = frame_idx
                     tracked_faces[tid]["processing"] = False
         except Exception:
             if track_id in tracked_faces:
@@ -221,224 +218,257 @@ def producer_worker():
         produce_queue.task_done()
 
 
+def init_producer(properties_path: str):
+    global producer, producer_thread
+    properties_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), properties_path
+    )
+    config = read_config(properties_path)
+    # low-latency defaults (only if not set in config file)
+    config.setdefault("acks", "1")
+    config.setdefault("queue.buffering.max.ms", "10")
+    config.setdefault("socket.nagle.disable", "true")
+    config.setdefault("compression.type", "none")
+
+    # create single producer and start worker thread
+    producer = Producer(config)
+    producer_thread = threading.Thread(target=producer_worker, daemon=True)
+    producer_thread.start()
+
+
 # ------------------- Main application -------------------
 
-cap = cv2.VideoCapture(0)
-if not cap.isOpened():
-    raise RuntimeError("Could not open camera")
 
-properties_path = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "camera_feed.properties"
-)
-config = read_config(properties_path)
-# low-latency defaults (only if not set in config file)
-config.setdefault("acks", "1")
-config.setdefault("queue.buffering.max.ms", "10")
-config.setdefault("socket.nagle.disable", "true")
-config.setdefault("compression.type", "none")
+def main_cycle(produce: bool):
+    frame_index = 0
+    next_track_id = 0
+    tracked_faces = {}
 
-# create single producer and start worker thread
-producer = Producer(config)
-producer_thread = threading.Thread(target=producer_worker, daemon=True)
-producer_thread.start()
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        raise RuntimeError("Could not open camera")
 
-try:
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        frame_index += 1
-        h, w, _ = frame.shape
+            frame_index += 1
+            h, w, _ = frame.shape
 
-        # 1) Hand detection + finger counting
-        frame_rgb_for_mp = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(frame_rgb_for_mp)
+            # 1) Hand detection + finger counting
+            frame_rgb_for_mp = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = hands.process(frame_rgb_for_mp)
 
-        finger_count = []
-        per_hand_smooth = {}
-        hands_positions = []
+            finger_count = []
+            per_hand_smooth = {}
+            hands_positions = []
 
-        if results.multi_hand_landmarks and results.multi_handedness:
-            for hand_landmarks, hand_handedness in zip(
-                results.multi_hand_landmarks, results.multi_handedness
-            ):
-                hand_label = hand_handedness.classification[0].label
-                fingers = count_fingers(hand_landmarks, hand_label)
-                finger_count.append(fingers)
+            if results.multi_hand_landmarks and results.multi_handedness:
+                for hand_landmarks, hand_handedness in zip(
+                    results.multi_hand_landmarks, results.multi_handedness
+                ):
+                    hand_label = hand_handedness.classification[0].label
+                    fingers = count_fingers(hand_landmarks, hand_label)
+                    finger_count.append(fingers)
 
-                wrist = hand_landmarks.landmark[0]
-                x_pos = int(wrist.x * w)
-                y_pos = int(wrist.y * h) - 30
-                if y_pos < 20:
-                    y_pos = int(wrist.y * h) + 30
+                    wrist = hand_landmarks.landmark[0]
+                    x_pos = int(wrist.x * w)
+                    y_pos = int(wrist.y * h) - 30
+                    if y_pos < 20:
+                        y_pos = int(wrist.y * h) + 30
 
-                key = (round(x_pos / 40), round(y_pos / 40))
-                if key not in per_hand_smooth:
-                    per_hand_smooth[key] = deque(maxlen=FINGER_SMOOTH_HISTORY)
-                per_hand_smooth[key].append(fingers)
-                smoothed = int(
-                    round(sum(per_hand_smooth[key]) / len(per_hand_smooth[key]))
+                    key = (round(x_pos / 40), round(y_pos / 40))
+                    if key not in per_hand_smooth:
+                        per_hand_smooth[key] = deque(maxlen=FINGER_SMOOTH_HISTORY)
+                    per_hand_smooth[key].append(fingers)
+                    smoothed = int(
+                        round(sum(per_hand_smooth[key]) / len(per_hand_smooth[key]))
+                    )
+
+                    hands_positions.append((smoothed, (x_pos, y_pos)))
+
+                    mp_drawing.draw_landmarks(
+                        frame, hand_landmarks, mp_hands.HAND_CONNECTIONS
+                    )
+                    cv2.putText(
+                        frame,
+                        f"{hand_label}: {smoothed}",
+                        (x_pos, y_pos),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.9,
+                        (0, 255, 0),
+                        2,
+                        cv2.LINE_AA,
+                    )
+
+            # 2) Face detection (Haar cascade)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            detected = face_cascade.detectMultiScale(
+                gray, scaleFactor=1.1, minNeighbors=6, minSize=(60, 60)
+            )
+
+            seen_track_ids = set()
+
+            for x, y, fw, fh in detected:
+                x0 = max(x, 0)
+                y0 = max(y, 0)
+                x1 = min(x + fw, w)
+                y1 = min(y + fh, h)
+                roi = frame[y0:y1, x0:x1].copy()
+                if roi.size == 0:
+                    continue
+
+                roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+                mp_results = face_detector_mp.process(roi_rgb)
+                if not (mp_results and mp_results.detections):
+                    continue
+
+                cx, cy = centroid_of_bbox((x, y, fw, fh))
+
+                best_tid = None
+                best_dist = None
+                for tid, info in tracked_faces.items():
+                    dist = euclidean((cx, cy), info["centroid"])
+                    if best_dist is None or dist < best_dist:
+                        best_dist = dist
+                        best_tid = tid
+
+                if (
+                    best_tid is not None
+                    and best_dist is not None
+                    and best_dist < DISTANCE_MATCH_THRESHOLD
+                ):
+                    tid = best_tid
+                    tracked_faces[tid]["bbox"] = (x, y, fw, fh)
+                    tracked_faces[tid]["centroid"] = (cx, cy)
+                    tracked_faces[tid]["last_seen_frame"] = frame_index
+                    seen_track_ids.add(tid)
+                else:
+                    tid = next_track_id
+                    next_track_id += 1
+                    tracked_faces[tid] = {
+                        "bbox": (x, y, fw, fh),
+                        "centroid": (cx, cy),
+                        "emotion": "neutral",
+                        "processing": False,
+                        "last_analyzed_frame": -9999,
+                        "last_seen_frame": frame_index,
+                    }
+                    seen_track_ids.add(tid)
+
+                info = tracked_faces.get(tid)
+                if info is None:
+                    continue
+                needs_analysis = (not info.get("processing", False)) and (
+                    frame_index - info.get("last_analyzed_frame", -9999)
+                    >= REANALYZE_FRAMES
                 )
+                if needs_analysis:
+                    pad = int(min(fw, fh) * 0.15)
+                    xa = max(x - pad, 0)
+                    ya = max(y - pad, 0)
+                    xb = min(x + fw + pad, w)
+                    yb = min(y + fh + pad, h)
+                    face_roi = frame[ya:yb, xa:xb].copy()
+                    submit_face_for_analysis(tid, face_roi, tracked_faces, frame_index)
 
-                hands_positions.append((smoothed, (x_pos, y_pos)))
+            to_delete = []
+            for tid, info in list(tracked_faces.items()):
+                if (
+                    frame_index - info.get("last_seen_frame", 0)
+                    > TRACKER_DISAPPEAR_FRAMES
+                ):
+                    to_delete.append(tid)
+            for tid in to_delete:
+                del tracked_faces[tid]
 
-                mp_drawing.draw_landmarks(
-                    frame, hand_landmarks, mp_hands.HAND_CONNECTIONS
-                )
+            faces_positions = []
+            emotions_dict = {}
+
+            for tid, info in tracked_faces.items():
+                x, y, fw, fh = info["bbox"]
+                emotion = info.get("emotion", "neutral")
+                emotions_dict[tid] = emotion.upper()
+                cv2.rectangle(frame, (x, y), (x + fw, y + fh), (0, 0, 255), 2)
+                label = f"{emotion}"
                 cv2.putText(
                     frame,
-                    f"{hand_label}: {smoothed}",
-                    (x_pos, y_pos),
+                    label,
+                    (x, y - 10),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.9,
-                    (0, 255, 0),
+                    (0, 0, 255),
                     2,
-                    cv2.LINE_AA,
+                )
+                faces_positions.append((tid, info["centroid"]))
+
+            cv2.putText(
+                frame,
+                f"People: {len(tracked_faces)}",
+                (10, 80),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.9,
+                (255, 0, 0),
+                2,
+                cv2.LINE_AA,
+            )
+
+            # convert to RGB for Streamlit
+            frame_rgb_display = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            st_frame.image(frame_rgb_display, channels="RGB")
+
+            facemap = map_hands_to_faces(hands_positions, faces_positions)
+
+            msg = []
+            for tid, emotion in emotions_dict.items():
+                msg.append(
+                    {"id": tid, "emotion": emotion, "fingers": facemap.get(tid, [])}
                 )
 
-        # 2) Face detection (Haar cascade)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        detected = face_cascade.detectMultiScale(
-            gray, scaleFactor=1.1, minNeighbors=6, minSize=(60, 60)
-        )
+            # include a timestamp for latency measurement
+            payload = json.dumps(msg)
 
-        seen_track_ids = set()
+            # non-blocking enqueue; drop if queue full (keeps camera loop low-latency)
+            if produce:
+                try:
+                    produce_queue.put_nowait(
+                        ("emotions.rt.v2", str(frame_index), payload)
+                    )
+                except queue.Full:
+                    # drop message - measure dropped count in real app if needed
+                    log.warning("Producer queue full: dropping message")
 
-        for x, y, fw, fh in detected:
-            x0 = max(x, 0)
-            y0 = max(y, 0)
-            x1 = min(x + fw, w)
-            y1 = min(y + fh, h)
-            roi = frame[y0:y1, x0:x1].copy()
-            if roi.size == 0:
-                continue
+                # small sleep to yield CPU and allow Streamlit to serve updates
+                time.sleep(0.02)
 
-            roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
-            mp_results = face_detector_mp.process(roi_rgb)
-            if not (mp_results and mp_results.detections):
-                continue
+    finally:
+        # cleanup pipeline
+        shutdown_event.set()
+        # wait a short while for worker to drain
+        if producer_thread is not None:
+            producer_thread.join(timeout=2.0)
 
-            cx, cy = centroid_of_bbox((x, y, fw, fh))
+        # flush outstanding messages (only at shutdown)
+        if producer is not None:
+            try:
+                producer.flush(5)
+            except Exception:
+                log.exception("Producer flush failed")
 
-            best_tid = None
-            best_dist = None
-            for tid, info in tracked_faces.items():
-                dist = euclidean((cx, cy), info["centroid"])
-                if best_dist is None or dist < best_dist:
-                    best_dist = dist
-                    best_tid = tid
+        cap.release()
+        # no cv2.destroyAllWindows() because we don't open local windows
+        hands.close()
+        face_detector_mp.close()
+        executor.shutdown(wait=False)
+        log.info("Shutdown complete")
 
-            if (
-                best_tid is not None
-                and best_dist is not None
-                and best_dist < DISTANCE_MATCH_THRESHOLD
-            ):
-                tid = best_tid
-                tracked_faces[tid]["bbox"] = (x, y, fw, fh)
-                tracked_faces[tid]["centroid"] = (cx, cy)
-                tracked_faces[tid]["last_seen_frame"] = frame_index
-                seen_track_ids.add(tid)
-            else:
-                tid = next_track_id
-                next_track_id += 1
-                tracked_faces[tid] = {
-                    "bbox": (x, y, fw, fh),
-                    "centroid": (cx, cy),
-                    "emotion": "neutral",
-                    "processing": False,
-                    "last_analyzed_frame": -9999,
-                    "last_seen_frame": frame_index,
-                }
-                seen_track_ids.add(tid)
 
-            info = tracked_faces.get(tid)
-            if info is None:
-                continue
-            needs_analysis = (not info.get("processing", False)) and (
-                frame_index - info.get("last_analyzed_frame", -9999) >= REANALYZE_FRAMES
-            )
-            if needs_analysis:
-                pad = int(min(fw, fh) * 0.15)
-                xa = max(x - pad, 0)
-                ya = max(y - pad, 0)
-                xb = min(x + fw + pad, w)
-                yb = min(y + fh + pad, h)
-                face_roi = frame[ya:yb, xa:xb].copy()
-                submit_face_for_analysis(tid, face_roi)
-
-        to_delete = []
-        for tid, info in list(tracked_faces.items()):
-            if frame_index - info.get("last_seen_frame", 0) > TRACKER_DISAPPEAR_FRAMES:
-                to_delete.append(tid)
-        for tid in to_delete:
-            del tracked_faces[tid]
-
-        faces_positions = []
-        emotions_dict = {}
-
-        for tid, info in tracked_faces.items():
-            x, y, fw, fh = info["bbox"]
-            emotion = info.get("emotion", "neutral")
-            emotions_dict[tid] = emotion.upper()
-            cv2.rectangle(frame, (x, y), (x + fw, y + fh), (0, 0, 255), 2)
-            label = f"{emotion}"
-            cv2.putText(
-                frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2
-            )
-            faces_positions.append((tid, info["centroid"]))
-
-        cv2.putText(
-            frame,
-            f"People: {len(tracked_faces)}",
-            (10, 80),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.9,
-            (255, 0, 0),
-            2,
-            cv2.LINE_AA,
-        )
-
-        # convert to RGB for Streamlit
-        frame_rgb_display = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        st_frame.image(frame_rgb_display, channels="RGB")
-
-        facemap = map_hands_to_faces(hands_positions, faces_positions)
-
-        msg = []
-        for tid, emotion in emotions_dict.items():
-            msg.append({"id": tid, "emotion": emotion, "fingers": facemap.get(tid, [])})
-
-        # include a timestamp for latency measurement
-        payload = json.dumps(msg)
-
-        # non-blocking enqueue; drop if queue full (keeps camera loop low-latency)
-        try:
-            produce_queue.put_nowait(("emotions.rt.v2", str(frame_index), payload))
-        except queue.Full:
-            # drop message - measure dropped count in real app if needed
-            log.warning("Producer queue full: dropping message")
-
-        # small sleep to yield CPU and allow Streamlit to serve updates
-        time.sleep(0.02)
-
-finally:
-    # cleanup pipeline
-    shutdown_event.set()
-    # wait a short while for worker to drain
-    if producer_thread is not None:
-        producer_thread.join(timeout=2.0)
-
-    # flush outstanding messages (only at shutdown)
-    if producer is not None:
-        try:
-            producer.flush(5)
-        except Exception:
-            log.exception("Producer flush failed")
-
-    cap.release()
-    # no cv2.destroyAllWindows() because we don't open local windows
-    hands.close()
-    face_detector_mp.close()
-    executor.shutdown(wait=False)
-    log.info("Shutdown complete")
+if __name__ == "__main__":
+    if "no-produce" not in sys.argv:
+        init_producer("camera_feed.properties")
+        main_cycle(True)
+    else:
+        print("Launching in no producer mode")
+        main_cycle(False)

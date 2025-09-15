@@ -27,6 +27,14 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # Copy app code
 COPY recognition/ /app
 
+# Create a Streamlit config file (so it never shows first-run msg)
+RUN mkdir -p /root/.streamlit && \
+    echo "[browser]\n" \
+         "gatherUsageStats = false\n" \
+         "[server]\n" \
+         "headless = true\n" \
+    > /root/.streamlit/config.toml
+
 # Expose Streamlit port
 EXPOSE 8501
 

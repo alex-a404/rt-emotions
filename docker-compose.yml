@@ -65,6 +65,31 @@ services:
     environment:
       - DISPLAY=${DISPLAY}           # forward X11 for GUI (Linux)
       - PYTHONUNBUFFERED=1
+      - STREAMLIT_DISABLE_WELCOME=true
+
+  standalone:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: standalone-emotion
+    depends_on:
+      - jobmanager
+      - taskmanager
+    volumes:
+      - ./recognition:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix   # X11 socket for GUI (Linux only)
+    working_dir: /app
+    # Streamlit serves the UI; bind to 0.0.0.0 so host can reach it
+    command: >
+      streamlit run src/emotion.py --server.port=8501 --server.address=0.0.0.0 --browser.gatherUsageStats=false -- no-produce
+    stdin_open: true
+    tty: true
+    devices:
+      - "/dev/video0:/dev/video0"   # camera (Linux) — remove on Windows/macOS
+    environment:
+      - DISPLAY=${DISPLAY}           # forward X11 for GUI (Linux)
+      - PYTHONUNBUFFERED=1
+
     ports:
       - "8501:8501"                  # Streamlit UI
     restart: unless-stopped

@@ -45,4 +45,4 @@ def consume(topic, config):
 config = read_config(
     "/home/alex/Desktop/facerec/recognition/src/camera_feed.properties"
 )
-consume("rt.smile-events.v1", config)
+consume("emotions.rt.v2", config)
