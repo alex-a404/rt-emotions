@@ -1,6 +1,6 @@
 
 ## Overview:
-This is a project which consists of a data pipeline:
+This is a project which consists of a data pipeline. It has 2 main components: A) a python script that reads input from a camera, recognizez the emotions of people in the frame and the number of fingers they are holding up, and writes into a data stream. B) a set of Apache Flink jobs that perform manipulations on the streams and provide some insights.
 #### Current features:
 - Reads frames from a camera feed, labels emotions and number of fingers and maps them to people in the frame.
 - Produces the results into a given Kafka topic.
