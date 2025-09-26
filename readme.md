@@ -1,6 +1,6 @@
 
 ## Overview:
-This is a project which consists of a data pipeline. It has 2 main components: A) a python script that reads input from a camera, recognizez the emotions of people in the frame and the number of fingers they are holding up, and writes into a data stream. B) a set of Apache Flink jobs that perform manipulations on the streams and provide some insights.
+This is a project which consists of a data pipeline. It has 2 main components: A) a python script that reads input from a camera, recognizes the emotions of people in the frame and the number of fingers they are holding up, and writes into a data stream. B) a set of Apache Flink jobs that perform manipulations on the streams and provide some insights.
 #### Current features:
 - Reads frames from a camera feed, labels emotions and number of fingers and maps them to people in the frame.
 - Produces the results into a given Kafka topic.
@@ -12,6 +12,8 @@ This is a project which consists of a data pipeline. It has 2 main components: A
 1. To launch the app in standalone (local face/hand recognition only mode with no producing or analytics) mode: <br>
 `docker compose up --build standalone`
 <br>Then visit localhost:8501 and enjoy!
+2. To launch the full pipeline:
+`docker compose up --build`. This will start all the services. Once started, run `docker compose up flink-sql-job`. This will launch an updating dashboard.
 
 
 Remarks:
