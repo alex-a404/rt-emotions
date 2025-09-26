@@ -4,10 +4,8 @@ This is a project which consists of a data pipeline. It has 2 main components: A
 #### Current features:
 - Reads frames from a camera feed, labels emotions and number of fingers and maps them to people in the frame.
 - Produces the results into a given Kafka topic.
-
-#### WIP (Roadmap):
-
 - Launches a Flink job, deserializes data.
+#### WIP (Roadmap):
 - Provides real-time analytics.
 
 ## Launch instructions:
