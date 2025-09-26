@@ -4,6 +4,8 @@ CREATE TABLE emotions (
   emotion STRING
 ) WITH (
   'connector' = 'kafka',
+  'topic' = 'rt.emotions-unique.v1',
+  'properties.bootstrap.servers' = 'kafka:9092',
   'format' = 'json',
   'scan.startup.mode' = 'earliest-offset'
 );
