@@ -30,11 +30,8 @@ def consume(topic, config):
             # consumer polls the topic and prints any incoming messages
             msg = consumer.poll(1.0)
             if msg is not None and msg.error() is None:
-                key = 0
                 value = msg.value().decode("utf-8")
-                print(
-                    f"Consumed message from topic {topic}: key = {key:12} value = {value:12}"
-                )
+                print(f"{value:12}")
     except KeyboardInterrupt:
         pass
     finally:
@@ -45,4 +42,4 @@ def consume(topic, config):
 config = read_config(
     "/home/alex/Desktop/facerec/recognition/src/camera_feed.properties"
 )
-consume("emotions.rt.v2", config)
+consume("rt.smile-events.v1", config)

@@ -36,8 +36,8 @@ public class UniqueEmotionsEventsJob {
         KafkaSource<List<Person>> source =
                 KafkaSource.<List<Person>>builder()
                         .setBootstrapServers(config.getProperty("bootstrap.servers"))
-                        .setTopics("emotions.rt.v2")
-                        .setGroupId(config.getProperty("group.id"))
+                        .setTopics("rt.emotions-recorded.v1")
+
                         .setProperties(config)
                         .setValueOnlyDeserializer(new PersonListDeserializationSchema())
                         .setStartingOffsets(OffsetsInitializer.latest()) //get latest from Kafka topic
@@ -48,7 +48,7 @@ public class UniqueEmotionsEventsJob {
                 .setBootstrapServers(config.getProperty("bootstrap.servers"))
                 .setKafkaProducerConfig(config)
                 .setRecordSerializer(KafkaRecordSerializationSchema.builder()
-                        .setTopic("rt.smile-events.v1")
+                        .setTopic("rt.emotions-unique.v1")
                         .setValueSerializationSchema(
                                 (SerializationSchema<EmotionsEvent>) emotionsEvent -> {
                                     try {

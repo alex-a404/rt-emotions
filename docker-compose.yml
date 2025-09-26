@@ -28,12 +28,13 @@ services:
         taskmanager.numberOfTaskSlots: 2
 
   # this is to automatically submit Java and SQL Flink jobs
-  job-submitter:
+  java-job-submitter:
     image: flink:1.20.0-scala_2.12-java17
-    container_name: job-submitter
+    container_name: java-job-submitter
     depends_on:
       - jobmanager
       - taskmanager
+      - create-kafka-topics
     volumes:
       - ./flink-java-jobs/build/libs:/jars
     entrypoint: >
@@ -53,6 +54,7 @@ services:
       - taskmanager
     volumes:
       - ./recognition:/app
+      - ./configs/camera_feed.properties:/app/src/camera_feed.properties
       - /tmp/.X11-unix:/tmp/.X11-unix   # X11 socket for GUI (Linux only)
     working_dir: /app
     # Streamlit serves the UI; bind to 0.0.0.0 so host can reach it
@@ -65,16 +67,18 @@ services:
     environment:
       - DISPLAY=${DISPLAY}           # forward X11 for GUI (Linux)
       - PYTHONUNBUFFERED=1
-      - STREAMLIT_DISABLE_WELCOME=true
+    ports:
+      - "8501:8501"                  # Streamlit UI
+    restart: unless-stopped
 
+
+  # standalone mode: do not produce to Kafka and do not launch analytics
   standalone:
+    profiles: ["standalone"]
     build:
       context: .
       dockerfile: Dockerfile
     container_name: standalone-emotion
-    depends_on:
-      - jobmanager
-      - taskmanager
     volumes:
       - ./recognition:/app
       - /tmp/.X11-unix:/tmp/.X11-unix   # X11 socket for GUI (Linux only)
@@ -93,3 +97,49 @@ services:
     ports:
       - "8501:8501"                  # Streamlit UI
     restart: unless-stopped
+
+
+  # create 2 kafka topics
+    # zookeeper + kafka (dev, single-node)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.1
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  create-kafka-topics:
+    image: confluentinc/cp-kafka:7.4.1
+    container_name: create-kafka-topics
+    depends_on:
+      - kafka
+    restart: "no"
+    command: >
+      /bin/sh -c "
+      until kafka-topics --bootstrap-server kafka:9092 --list >/dev/null 2>&1; do sleep 1; done;
+      kafka-topics --bootstrap-server kafka:9092 --create --topic rt.emotions-recorded.v1 --partitions 1 --replication-factor 1 || true;
+      kafka-topics --bootstrap-server kafka:9092 --create --topic rt.emotions-unique.v1 --partitions 1 --replication-factor 1 || true;
+      echo Topics created;
+      "

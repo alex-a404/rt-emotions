@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy app code
 COPY recognition/ /app
+COPY configs/ /app/src
 
 # Create a Streamlit config file (so it never shows first-run msg)
 RUN mkdir -p /root/.streamlit && \

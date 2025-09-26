@@ -434,7 +434,7 @@ def main_cycle(produce: bool):
             if produce:
                 try:
                     produce_queue.put_nowait(
-                        ("emotions.rt.v2", str(frame_index), payload)
+                        ("rt.emotions-recorded.v1", str(frame_index), payload)
                     )
                 except queue.Full:
                     # drop message - measure dropped count in real app if needed
