@@ -17,4 +17,7 @@ This is a project which consists of a data pipeline. It has 2 main components: A
 
 
 Remarks:
-This is not an AI/ML project but rather a data engineering proof-of-concept, and as such you would be right to question the quality of the frame detection, which was mostly made by combining code from 2 repos and of course LLMs. However, feel free to contribute if you have any ideas on how to improve it
+This is not an AI/ML project but rather a data engineering proof-of-concept, and as such you would be right to question the quality of the frame detection, which was mostly made by combining code from 2 repos and of course LLMs. However, feel free to contribute if you have any ideas on how to improve it.
+
+## Diagram
+![Overview Diagram](https://github.com/user-attachments/assets/5ffaa892-baa4-48c0-a75c-2a50f749c4d7)
